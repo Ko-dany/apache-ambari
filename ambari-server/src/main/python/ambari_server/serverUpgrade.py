@@ -108,31 +108,37 @@ from ambari_commons.logging_utils import (
   set_debug_mode_from_options,
   get_silent,
 )
+from serverConfiguration import AMBARI_JAVA_VERSION
 
 logger = logging.getLogger(__name__)
 
 # constants
 STACK_NAME_VER_SEP = "-"
 
-SCHEMA_UPGRADE_HELPER_CMD = (
-  "{0} -cp {1} "
-  + "org.apache.ambari.server.upgrade.SchemaUpgradeHelper"
-  + " > "
-  + configDefaults.SERVER_OUT_FILE
-  + " 2>&1"
-)
+def build_schema_upgrade_cmd(jdk_path, class_path, debug=False, suspend="n"):
+  base_cmd = f"{jdk_path} "
+  java_opts = ""
 
-SCHEMA_UPGRADE_HELPER_CMD_DEBUG = (
-  "{0} "
-  "-server -XX:NewRatio=2 "
-  "-XX:+UseConcMarkSweepGC " + " -Xdebug -Xrunjdwp:transport=dt_socket,address=5005,"
-  "server=y,suspend={2} "
-  "-cp {1} "
-  + "org.apache.ambari.server.upgrade.SchemaUpgradeHelper"
-  + " > "
-  + configDefaults.SERVER_OUT_FILE
-  + " 2>&1"
-)
+  # Apply --add--opens for JDK versions higher than 11
+  if AMBARI_JAVA_VERSION > 11:
+    java_opts += "--add-opens=java.base/java.lang=ALL-UNNAMED "
+
+  # Add debug options depending on JDK version
+  if debug:
+    if AMBARI_JAVA_VERSION > 11:
+      java_opts += (
+        f"-agentlib:jdwp=transport=dt_socket,address=5005,server=y,suspend={suspend} "
+      )
+    else:
+      java_opts += f"-server -XX:NewRatio=2 -XX:+UseConcMarkSweepGC -Xdebug -Xrunjdwp:transport=dt_socket,address=5005,server=y,suspend={suspend} "
+
+  cmd = (
+          base_cmd
+          + java_opts
+          + f"-cp {class_path} org.apache.ambari.server.upgrade.SchemaUpgradeHelper"
+          + f" > {configDefaults.SERVER_OUT_FILE} 2>&1"
+  )
+  return cmd
 
 SCHEMA_UPGRADE_DEBUG = False
 
@@ -235,9 +241,9 @@ def run_schema_upgrade(args):
   suspend_start = (debug_mode & 2) or SUSPEND_START_MODE
   suspend_mode = "y" if suspend_start else "n"
   command = (
-    SCHEMA_UPGRADE_HELPER_CMD_DEBUG.format(jdk_path, class_path, suspend_mode)
+    build_schema_upgrade_cmd(jdk_path, class_path, True, suspend_mode)
     if debug_start
-    else SCHEMA_UPGRADE_HELPER_CMD.format(jdk_path, class_path)
+    else build_schema_upgrade_cmd(jdk_path, class_path)
   )
 
   ambari_user = read_ambari_user()
